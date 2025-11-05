@@ -7,49 +7,6 @@ import TrimmerEngine
 /// View model for the trim timeline.
 /// - Sync initializer (no await inside StateObject).
 /// - Kicks off async loading via Task on the main actor.
-@MainActor
-public final class TrimViewModel: ObservableObject {
-    // MARK: - Published state
-    @Published public var start: CMTime = .zero
-    @Published public var end: CMTime = .zero
-    @Published public var thumbnails: [ThumbnailGenerator.Frame] = []
-
-    // MARK: - Media
-    public private(set) var duration: CMTime = .zero
-    public let asset: AVAsset
-    public let assetURL: URL
-
-    /// Synchronous initializer. Creates the AVAsset and starts loading.
-    public init(assetURL: URL) {
-        self.assetURL = assetURL
-        self.asset = AVURLAsset(url: assetURL)
-        // Start async work after init
-        Task { await load() }
-    }
-
-    /// Asynchronously loads duration and thumbnails.
-    public func load() async {
-        do {
-            let d = try await asset.load(.duration)
-            duration = d
-            end = d
-
-            let generator = ThumbnailGenerator(asset: asset) // @MainActor
-            thumbnails = try await generator.generate(
-                every: max(0.5, d.seconds / 12),
-                maxCount: 50,
-                maximumHeight: 72
-            )
-        } catch {
-            // Optional: expose an @Published error if you want to surface this
-            #if DEBUG
-            print("TrimViewModel load error:", error)
-            #endif
-        }
-    }
-
-    public var range: CMTimeRange { .init(start: start, end: end) }
-}
 
 /// Horizontal, scrollable timeline with draggable start/end handles.
 /// Provide `assetURL` and get user-selected `start`/`end` via the view model,
