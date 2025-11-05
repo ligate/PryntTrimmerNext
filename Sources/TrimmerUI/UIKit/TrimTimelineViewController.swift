@@ -1,89 +1,118 @@
-import UIKit
+// Sources/TrimmerUI/SwiftUI/TrimTimelineView.swift
+
+import SwiftUI
 import AVFoundation
 import TrimmerEngine
 
-public final class TrimTimelineViewController: UIViewController {
-    private let asset: AVAsset
-    private var thumbnails: [ThumbnailGenerator.Frame] = []
-    private let collection = UICollectionView(frame: .zero, collectionViewLayout: UICollectionViewFlowLayout())
-    private let startHandle = UIView()
-    private let endHandle = UIView()
+/// View model for the trim timeline.
+/// - Sync initializer (no await inside StateObject).
+/// - Kicks off async loading via Task on the main actor.
+@MainActor
+public final class TrimViewModel: ObservableObject {
+    // MARK: - Published state
+    @Published public var start: CMTime = .zero
+    @Published public var end: CMTime = .zero
+    @Published public var thumbnails: [ThumbnailGenerator.Frame] = []
 
-    public private(set) var start: CMTime = .zero
-    public private(set) var end: CMTime
+    // MARK: - Media
+    public private(set) var duration: CMTime = .zero
+    public let asset: AVAsset
+    public let assetURL: URL
 
+    /// Synchronous initializer. Creates the AVAsset and starts loading.
     public init(assetURL: URL) {
+        self.assetURL = assetURL
         self.asset = AVURLAsset(url: assetURL)
-        self.end = self.asset.duration
-        super.init(nibName: nil, bundle: nil)
+        // Start async work after init
+        Task { await load() }
     }
-    required init?(coder: NSCoder) { fatalError() }
 
-    public override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = .clear
-        if let flow = collection.collectionViewLayout as? UICollectionViewFlowLayout {
-            flow.scrollDirection = .horizontal
-            flow.minimumLineSpacing = 2
-            flow.itemSize = CGSize(width: 80, height: 72)
-        }
-        collection.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "c")
-        collection.dataSource = self
-        collection.backgroundColor = .clear
-        view.addSubview(collection)
-        collection.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            collection.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            collection.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collection.topAnchor.constraint(equalTo: view.topAnchor),
-            collection.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
+    /// Asynchronously loads duration and thumbnails.
+    public func load() async {
+        do {
+            let d = try await asset.load(.duration)
+            duration = d
+            end = d
 
-        configureHandle(startHandle, color: .systemBlue, x: 20)
-        configureHandle(endHandle, color: .systemBlue, x: view.bounds.width - 20)
-
-        Task { [weak self] in
-            guard let self else { return }
-            let gen = ThumbnailGenerator(asset: self.asset)
-            self.thumbnails = (try? await gen.generate(every: max(0.5, self.asset.duration.seconds/12))) ?? []
-            self.collection.reloadData()
+            let generator = ThumbnailGenerator(asset: asset) // @MainActor
+            thumbnails = try await generator.generate(
+                every: max(0.5, d.seconds / 12),
+                maxCount: 50,
+                maximumHeight: 72
+            )
+        } catch {
+            // Optional: expose an @Published error if you want to surface this
+            #if DEBUG
+            print("TrimViewModel load error:", error)
+            #endif
         }
     }
 
-    private func configureHandle(_ v: UIView, color: UIColor, x: CGFloat) {
-        v.backgroundColor = color
-        v.layer.cornerRadius = 2
-        v.translatesAutoresizingMaskIntoConstraints = true
-        v.frame = CGRect(x: x, y: 0, width: 4, height: 72)
-        view.addSubview(v)
-        let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        v.addGestureRecognizer(pan)
+    public var range: CMTimeRange { .init(start: start, end: end) }
+}
+
+/// Horizontal, scrollable timeline with draggable start/end handles.
+/// Provide `assetURL` and get user-selected `start`/`end` via the view model,
+/// or consume `range` when exporting.
+public struct TrimTimelineView: View {
+    @StateObject private var vm: TrimViewModel
+    let onScrub: (CMTime) -> Void
+
+    /// Synchronous init to satisfy StateObject requirements.
+    public init(assetURL: URL, onScrub: @escaping (CMTime) -> Void) {
+        _vm = StateObject(wrappedValue: TrimViewModel(assetURL: assetURL))
+        self.onScrub = onScrub
     }
 
-    @objc private func handlePan(_ g: UIPanGestureRecognizer) {
-        let x = max(0, min(g.location(in: view).x, view.bounds.width))
-        g.view?.center.x = x
-        let progress = x / max(view.bounds.width, 1)
-        let time = CMTime(seconds: progress * max(asset.duration.seconds, 0.0001), preferredTimescale: 600)
-        if g.view === startHandle { start = time } else { end = time }
+    public var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .leading) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 2) {
+                        ForEach(Array(vm.thumbnails.enumerated()), id: \.offset) { _, frame in
+                            Image(uiImage: frame.image)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 80, height: geo.size.height)
+                                .clipped()
+                        }
+                    }
+                }
+
+                Handle(position: $vm.start, duration: vm.duration, width: geo.size.width)
+                Handle(position: $vm.end, duration: vm.duration, width: geo.size.width)
+            }
+            .contentShape(Rectangle())
+        }
+        .frame(height: 72)
+        // Alternative pattern if you prefer to trigger loading here instead of in VM.init():
+        // .task { await vm.load() }
     }
 }
 
-extension TrimTimelineViewController: UICollectionViewDataSource {
-    public func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int { thumbnails.count }
-    public func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "c", for: indexPath)
-        let iv: UIImageView
-        if let existing = cell.contentView.viewWithTag(99) as? UIImageView { iv = existing }
-        else {
-            iv = UIImageView(frame: cell.contentView.bounds)
-            iv.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-            iv.contentMode = .scaleAspectFill
-            iv.clipsToBounds = true
-            iv.tag = 99
-            cell.contentView.addSubview(iv)
-        }
-        iv.image = thumbnails[indexPath.item].image
-        return cell
+private struct Handle: View {
+    @Binding var position: CMTime
+    let duration: CMTime
+    let width: CGFloat
+
+    var body: some View {
+        let x = CGFloat(position.seconds / max(duration.seconds, 0.0001)) * width
+
+        Rectangle()
+            .fill(BrandTheme.accent)
+            .frame(width: 4)
+            .cornerRadius(2)
+            .shadow(radius: 2)
+            .position(x: x, y: 36)
+            .gesture(
+                DragGesture().onChanged { g in
+                    let progress = min(max(g.location.x / max(width, 1), 0), 1)
+                    position = CMTime(
+                        seconds: progress * max(duration.seconds, 0.0001),
+                        preferredTimescale: 600
+                    )
+                    // If you want live scrubbing callbacks, you can call onScrub here by passing it down.
+                }
+            )
     }
 }
