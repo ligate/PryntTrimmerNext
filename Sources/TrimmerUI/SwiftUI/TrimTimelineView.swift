@@ -53,42 +53,6 @@ public final class TrimViewModel: ObservableObject {
 /// Horizontal, scrollable timeline with draggable start/end handles.
 /// Provide `assetURL` and get user-selected `start`/`end` via the view model,
 /// or consume `range` when exporting.
-public struct TrimTimelineView: View {
-    @StateObject private var vm: TrimViewModel
-    let onScrub: (CMTime) -> Void
-
-    /// Synchronous init to satisfy StateObject requirements.
-    public init(assetURL: URL, onScrub: @escaping (CMTime) -> Void) {
-        _vm = StateObject(wrappedValue: TrimViewModel(assetURL: assetURL))
-        self.onScrub = onScrub
-    }
-
-    public var body: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 2) {
-                        // Fix: correct ForEach id key path
-                        ForEach(Array(vm.thumbnails.enumerated()), id: \.offset) { _, frame in
-                            Image(uiImage: frame.image)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: 80, height: geo.size.height)
-                                .clipped()
-                        }
-                    }
-                }
-
-                Handle(position: $vm.start, duration: vm.duration, width: geo.size.width)
-                Handle(position: $vm.end, duration: vm.duration, width: geo.size.width)
-            }
-            .contentShape(Rectangle())
-        }
-        .frame(height: 72)
-        // If you prefer, you can move the loading trigger here instead:
-        // .task { await vm.load() }
-    }
-}
 
 private struct Handle: View {
     @Binding var position: CMTime
