@@ -1,82 +1,82 @@
-// Sources/TrimmerUI/SwiftUI/TrimTimelineView.swift
+// // Sources/TrimmerUI/SwiftUI/TrimTimelineView.swift
 
-import SwiftUI
-import AVFoundation
-import TrimmerEngine
+// import SwiftUI
+// import AVFoundation
+// import TrimmerEngine
 
-/// View model for the trim timeline.
-/// - Sync initializer (no await inside StateObject).
-/// - Kicks off async loading via Task on the main actor.
-@MainActor
-public final class TrimViewModel: ObservableObject {
-    // MARK: - Published state
-    @Published public var start: CMTime = .zero
-    @Published public var end: CMTime = .zero
-    @Published public var thumbnails: [ThumbnailGenerator.Frame] = []
+// /// View model for the trim timeline.
+// /// - Sync initializer (no await inside StateObject).
+// /// - Kicks off async loading via Task on the main actor.
+// @MainActor
+// public final class TrimViewModel: ObservableObject {
+//     // MARK: - Published state
+//     @Published public var start: CMTime = .zero
+//     @Published public var end: CMTime = .zero
+//     @Published public var thumbnails: [ThumbnailGenerator.Frame] = []
 
-    // MARK: - Media
-    public private(set) var duration: CMTime = .zero
-    public let asset: AVAsset
-    public let assetURL: URL
+//     // MARK: - Media
+//     public private(set) var duration: CMTime = .zero
+//     public let asset: AVAsset
+//     public let assetURL: URL
 
-    /// Synchronous initializer. Creates the AVAsset and starts loading.
-    public init(assetURL: URL) {
-        self.assetURL = assetURL
-        self.asset = AVURLAsset(url: assetURL)
-        // Start async work after init so StateObject is happy
-        Task { await load() }
-    }
+//     /// Synchronous initializer. Creates the AVAsset and starts loading.
+//     public init(assetURL: URL) {
+//         self.assetURL = assetURL
+//         self.asset = AVURLAsset(url: assetURL)
+//         // Start async work after init so StateObject is happy
+//         Task { await load() }
+//     }
 
-    /// Asynchronously loads duration and thumbnails.
-    public func load() async {
-        do {
-            let d = try await asset.load(.duration)
-            duration = d
-            end = d
+//     /// Asynchronously loads duration and thumbnails.
+//     public func load() async {
+//         do {
+//             let d = try await asset.load(.duration)
+//             duration = d
+//             end = d
 
-            let generator = ThumbnailGenerator(asset: asset) // @MainActor
-            thumbnails = try await generator.generate(
-                every: max(0.5, d.seconds / 12),
-                maxCount: 50,
-                maximumHeight: 72
-            )
-        } catch {
-            #if DEBUG
-            print("TrimViewModel load error:", error)
-            #endif
-        }
-    }
+//             let generator = ThumbnailGenerator(asset: asset) // @MainActor
+//             thumbnails = try await generator.generate(
+//                 every: max(0.5, d.seconds / 12),
+//                 maxCount: 50,
+//                 maximumHeight: 72
+//             )
+//         } catch {
+//             #if DEBUG
+//             print("TrimViewModel load error:", error)
+//             #endif
+//         }
+//     }
 
-    public var range: CMTimeRange { .init(start: start, end: end) }
-}
+//     public var range: CMTimeRange { .init(start: start, end: end) }
+// }
 
-/// Horizontal, scrollable timeline with draggable start/end handles.
-/// Provide `assetURL` and get user-selected `start`/`end` via the view model,
-/// or consume `range` when exporting.
+// /// Horizontal, scrollable timeline with draggable start/end handles.
+// /// Provide `assetURL` and get user-selected `start`/`end` via the view model,
+// /// or consume `range` when exporting.
 
-private struct Handle: View {
-    @Binding var position: CMTime
-    let duration: CMTime
-    let width: CGFloat
+// private struct Handle: View {
+//     @Binding var position: CMTime
+//     let duration: CMTime
+//     let width: CGFloat
 
-    var body: some View {
-        let x = CGFloat(position.seconds / max(duration.seconds, 0.0001)) * width
+//     var body: some View {
+//         let x = CGFloat(position.seconds / max(duration.seconds, 0.0001)) * width
 
-        Rectangle()
-            .fill(BrandTheme.accent)
-            .frame(width: 4)
-            .cornerRadius(2)
-            .shadow(radius: 2)
-            .position(x: x, y: 36)
-            .gesture(
-                DragGesture().onChanged { g in
-                    let progress = min(max(g.location.x / max(width, 1), 0), 1)
-                    position = CMTime(
-                        seconds: progress * max(duration.seconds, 0.0001),
-                        preferredTimescale: 600
-                    )
-                    // If you want live scrubbing callbacks, thread onScrub down and call it here.
-                }
-            )
-    }
-}
+//         Rectangle()
+//             .fill(BrandTheme.accent)
+//             .frame(width: 4)
+//             .cornerRadius(2)
+//             .shadow(radius: 2)
+//             .position(x: x, y: 36)
+//             .gesture(
+//                 DragGesture().onChanged { g in
+//                     let progress = min(max(g.location.x / max(width, 1), 0), 1)
+//                     position = CMTime(
+//                         seconds: progress * max(duration.seconds, 0.0001),
+//                         preferredTimescale: 600
+//                     )
+//                     // If you want live scrubbing callbacks, thread onScrub down and call it here.
+//                 }
+//             )
+//     }
+// }
